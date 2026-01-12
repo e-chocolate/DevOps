@@ -1,0 +1,965 @@
+#!/bin/bash
+export PATH=$PATH:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
+
+# Check if user is root
+if [ $(id -u) != "0" ]; then
+  echo "Error: You must be root to run this script!"
+  exit 1
+else
+  if env |grep -q SUDO; then
+    acme_sh_sudo="-f"
+  fi
+fi
+
+echo "+-------------------------------------------+"
+echo "|    Manager for lmnp, Written by Licess    |"
+echo "+-------------------------------------------+"
+echo "|             Modified by Cmite             |"
+echo "+-------------------------------------------+"
+
+PHPFPMPIDFILE=/usr/local/php/var/run/php-fpm.pid
+
+arg1=$1
+arg2=$2
+
+Echo_Red()
+{
+  echo -e " \e[0;31m$1\e[0m"
+}
+
+Echo_Green()
+{
+  echo -e " \e[0;32m$1\e[0m"
+}
+
+Echo_Yellow()
+{
+  echo -en " \e[0;33m$1\e[0m"
+}
+
+Echo_Blue()
+{
+  echo -e " \e[0;34m$1\e[0m"
+}
+
+Sleep_Sec()
+{
+  seconds=$1
+  while [ "${seconds}" -ge "0" ];do
+    echo -ne "\r     \r"
+    echo -n ${seconds}
+    seconds=$(($seconds - 1))
+    sleep 1
+  done
+  echo -ne "\r"
+}
+
+lmnp_start()
+{
+  echo "Starting LMNP..."
+  /etc/init.d/nginx start
+  if [ -f /etc/init.d/php-fpm ]; then
+    /etc/init.d/php-fpm start
+  fi
+}
+
+lmnp_stop()
+{
+  echo "Stoping LMNP..."
+  /etc/init.d/nginx stop
+  if [ -f /etc/init.d/php-fpm ]; then
+    /etc/init.d/php-fpm stop
+  fi
+}
+
+lmnp_reload()
+{
+  echo "Reload LMNP..."
+  /etc/init.d/nginx reload
+  if [ -f /etc/init.d/php-fpm ]; then
+    /etc/init.d/php-fpm reload
+  fi
+}
+
+lmnp_kill()
+{
+  echo "Kill nginx,php-fpm,mysql process..."
+  killall nginx
+  killall php-fpm
+  killall php-cgi
+  echo "done."
+}
+
+lmnp_status()
+{
+  /etc/init.d/nginx status
+  if [ -f $PHPFPMPIDFILE ]; then
+    echo "php-fpm is runing!"
+  else
+    echo "php-fpm is stop!"
+  fi
+}
+
+Function_Vhost()
+{
+  case "$1" in
+    [aA][dD][dD])
+      Add_VHost
+    ;;
+    [lL][iI][sS][tT])
+      List_VHost
+    ;;
+    [dD][eE][lL])
+      Del_VHost
+    ;;
+    [eE][xX][iI][tT])
+      exit 1
+    ;;
+    *)
+      echo "Usage: lmnp vhost {add|list|del}"
+      exit 1
+    ;;
+  esac
+}
+
+Add_VHost()
+{
+  domain=""
+  while :;do
+    Echo_Yellow "Please enter domain(example: www.example.com): "
+    read domain
+    if [ "${domain}" != "" ] && [[ "$domain" = "${domain%[[:space:]]*}" ]]; then
+      if [ -f "/usr/local/nginx/conf/vhost/${domain}.conf" ]; then
+        Echo_Red " ${domain} is exist,please check!"
+        exit 1
+      else
+        echo " Your domain: ${domain}"
+      fi
+      break
+    else
+      Echo_Red "Domain name can't be empty or contain spaces!"
+    fi
+  done
+
+  Echo_Yellow "Enter more domain name(example: example.com sub.example.com): "
+  read moredomain
+  if [ "${moredomain}" != "" ]; then
+    echo " domain list: ${moredomain}"
+  fi
+
+  vhostdir="/home/wwwroot/${domain}"
+  Echo_Yellow "Please enter the directory for the domain: $domain"
+  echo
+  Echo_Yellow "Default directory: /home/wwwroot/${domain}: "
+  read vhostdir
+  if [ "${vhostdir}" == "" ]; then
+    vhostdir="/home/wwwroot/${domain}"
+  fi
+  echo "Virtual Host Directory: ${vhostdir}"
+
+  Echo_Yellow "Allow Rewrite rule? (y/n) "
+  read allow_rewrite
+  if [[ "${allow_rewrite}" == "n" || "${allow_rewrite}" == "" ]]; then
+    rewrite="none"
+  elif [ "${allow_rewrite}" == "y" ]; then
+    rewrite="other"
+    echo "Please enter the rewrite of programme, "
+    echo "wordpress,discuzx,typecho,thinkphp,laravel,codeigniter,yii2,zblog rewrite was exist."
+    Echo_Yellow "(Default rewrite: other): "
+    read rewrite
+    if [ "${rewrite}" == "" ]; then
+      rewrite="other"
+    fi
+  fi
+  echo "You choose rewrite: ${rewrite}"
+
+  enable_php_pathinfo
+
+  Echo_Yellow "Allow access log? (y/n) "
+  read access_log
+  if [[ "${access_log}" == "n" || "${access_log}" == "" ]]; then
+    echo "Disable access log."
+    al="access_log off;"
+  else
+    Echo_Yellow "Enter access log filename(Default:${domain}.log): "
+    read al_name
+    if [ "${al_name}" == "" ]; then
+      al_name="${domain}"
+    fi
+    al="access_log  /home/wwwlogs/${al_name}.log;"
+    echo "You access log filename: ${al_name}.log"
+  fi
+
+  Echo_Yellow "Enable IPv6? (y/n) "
+  read enable_ipv6
+  if [[ "${enable_ipv6}" == "n" || "${enable_ipv6}" == "" ]]; then
+    echo "Disabled IPv6 Support in current Virtualhost."
+    enable_ipv6="n"
+  else
+    echo "Enabled IPv6 Support in current Virtualhost."
+    enable_ipv6="y"
+  fi
+
+  Echo_Yellow "Add SSL Certificate (y/n) "
+  read create_ssl
+  if [ "${create_ssl}" == "y" ]; then
+    Add_SSL_Menu
+  fi
+
+  echo ""
+  echo "Press any key to start create virtul host..."
+  OLDCONFIG=`stty -g`
+  stty -icanon -echo min 1 time 0
+  dd count=1 2>/dev/null
+  stty ${OLDCONFIG}
+
+  echo "Create Virtul Host directory......"
+  mkdir -p ${vhostdir}
+  if [ "${access_log}" == "y" ]; then
+    touch /home/wwwlogs/${al_name}.log
+  fi
+  echo "set permissions of Virtual Host directory......"
+  chmod -R 755 ${vhostdir}
+  chown -R www:www ${vhostdir}
+
+  Add_VHost_Config
+
+  cat >${vhostdir}/.user.ini<<EOF
+open_basedir=${vhostdir}:/tmp/:/proc/
+EOF
+  chmod 644 ${vhostdir}/.user.ini
+  # chattr +i ${vhostdir}/.user.ini
+
+  if [ -f /etc/init.d/php-fpm ]; then
+    /etc/init.d/php-fpm reload
+  fi
+
+  if [ "${create_ssl}" == "y" ]; then
+    Add_SSL
+  fi
+
+  Echo_Green "================================================"
+  echo "Virtualhost infomation:"
+  echo "Your domain: ${domain}"
+  echo "Home Directory: ${vhostdir}"
+  echo "Rewrite: ${rewrite}"
+  if [ "${access_log}" == "n" ]; then
+    echo "Enable log: no"
+  else
+    echo "Enable log: yes"
+  fi
+  if [ "${create_ssl}" == "y" ]; then
+    echo "Enable SSL: yes"
+    if [ "${ssl_choice}" == "1" ]; then
+      echo "  =>Certificate file"
+    elif [ "${ssl_choice}" == "2" ]; then
+      echo "  =>Let's Encrypt"
+    elif [ "${ssl_choice}" == "3" ]; then
+      echo "  =>BuyPass"
+    elif [ "${ssl_choice}" == "4" ]; then
+      echo "  =>ZeroSSL"
+    fi
+  fi
+  if [ "${enable_ipv6}" == "y" ]; then
+    echo "IPv6 Support: Enabled"
+  else
+    echo "IPv6 Support: Disabled"
+  fi
+  Echo_Green "================================================"
+}
+
+List_VHost()
+{
+  echo "Nginx Virtualhost list:"
+  ls /usr/local/nginx/conf/vhost/ | grep ".conf$" | sed 's/.conf//g'
+}
+
+Del_VHost()
+{
+  echo "======================================="
+  echo "Current Virtualhost:"
+  List_VHost
+  echo "======================================="
+  domain=""
+  while :;do
+    Echo_Yellow "Please enter domain you want to delete: "
+    read domain
+    if [ "${domain}" == "" ]; then
+      Echo_Red "Domain name can't be empty."
+    else
+      break
+    fi
+  done
+  if [ ! -f "/usr/local/nginx/conf/vhost/${domain}.conf" ]; then
+    echo "=========================================="
+    echo "Domain: ${domain} was not exist!"
+    echo "=========================================="
+    exit 1
+  else
+    if [ -f "${vhostdir}/.user.ini" ]; then
+      # chattr -i "${vhostdir}/.user.ini"
+      rm -f "${vhostdir}/.user.ini"
+    fi
+    rm -f /usr/local/nginx/conf/vhost/${domain}.conf
+    echo "========================================================"
+    echo "Domain: ${domain} has been deleted."
+    echo "Website files will not be deleted for security reasons."
+    echo "You need to manually delete the website files."
+    echo "========================================================"
+  fi
+}
+
+enable_php_pathinfo() {
+  if [ ! -f /etc/init.d/php-fpm ]; then
+    enable_php_pathinfo=''
+    return 1
+  fi
+  Echo_Yellow "Enable PHP Pathinfo? (y/n) "
+  read enable_pathinfo
+  if [[ "${enable_pathinfo}" == "n" || "${enable_pathinfo}" == "" ]]; then
+    echo "Disable pathinfo."
+    include_enable_php="$(cat<<EOF
+include enable-php.conf;
+
+        
+EOF
+)"
+  elif [ "${enable_pathinfo}" == "y" ]; then
+    echo "Enable pathinfo."
+    include_enable_php="$(cat<<EOF
+include enable-php-pathinfo.conf;
+
+        
+EOF
+)"
+  fi
+}
+
+Add_SSL_Info_Menu()
+{
+  domain=""
+  while :;do
+    Echo_Yellow "Please enter domain(example: www.example.com): "
+    read domain
+    if [ "${domain}" != "" ] && [[ "$domain" = "${domain%[[:space:]]*}" ]]; then
+      echo " Your domain: ${domain}"
+      break
+    else
+      Echo_Red "Domain name can't be empty or contain spaces!"
+    fi
+  done
+
+  Echo_Yellow "Enter more domain name(example: example.com sub.example.com): "
+  read moredomain
+  if [ "${moredomain}" != "" ]; then
+    echo " domain list: ${moredomain}"
+  fi
+
+  Echo_Yellow "Please enter the directory for the domain: $domain"
+  echo
+  echo "Default directory: /home/wwwroot/${domain}: "
+  read vhostdir
+  if [ "${vhostdir}" == "" ]; then
+    vhostdir="/home/wwwroot/${domain}"
+  fi
+  echo "Virtual Host Directory: ${vhostdir}"
+
+  Echo_Yellow "Allow Rewrite rule? (y/n) "
+  read allow_rewrite
+  if [[ "${allow_rewrite}" == "n" || "${allow_rewrite}" == "" ]]; then
+    rewrite="none"
+  elif [ "${allow_rewrite}" == "y" ]; then
+    rewrite="other"
+    echo "Please enter the rewrite of programme, "
+    echo "wordpress,discuzx,typecho,thinkphp,laravel,codeigniter,yii2,zblog rewrite was exist."
+    Echo_Yellow "(Default rewrite: other): "
+    read rewrite
+    if [ "${rewrite}" == "" ]; then
+      rewrite="other"
+    fi
+  fi
+  echo "You choose rewrite: ${rewrite}"
+
+  Echo_Yellow "Allow access log? (y/n) "
+  read access_log
+  if [[ "${access_log}" == "n" || "${access_log}" == "" ]]; then
+    echo "Disable access log."
+    al="access_log off;"
+  else
+    Echo_Yellow "Enter access log filename(Default:${domain}.log): "
+    read al_name
+    if [ "${al_name}" == "" ]; then
+      al_name="${domain}"
+    fi
+    al="access_log  /home/wwwlogs/${al_name}.log;"
+    echo "You access log filename: ${al_name}.log"
+  fi
+
+  enable_php_pathinfo
+
+  Echo_Yellow "Enable IPv6? (y/n) "
+  read enable_ipv6
+  if [[ "${enable_ipv6}" == "n" || "${enable_ipv6}" == "" ]]; then
+    echo "Disabled IPv6 Support in current Virtualhost."
+    enable_ipv6="n"
+  else
+    echo "Enabled IPv6 Support in current Virtualhost."
+    enable_ipv6="y"
+  fi
+}
+
+Add_SSL_Menu()
+{
+  if [ "${info}" == "n" ]; then
+    Add_SSL_Info_Menu
+  fi
+  echo "1: Use your own SSL Certificate and Key"
+  echo "2: Use Let's Encrypt to create SSL Certificate and Key"
+  echo "3: Use BuyPass to create SSL Certificate and Key"
+  echo "4: Use ZeroSSL to create SSL Certificate and Key"
+  while :;do
+    Echo_Yellow "Enter 1, 2, 3 or 4: "
+    read ssl_choice
+    if [ "${ssl_choice}" == "1" ]; then
+      while :;do
+        Echo_Yellow "Please enter full path to SSL Certificate file: "
+        read ssl_certificate
+        if [ "${ssl_certificate}" == "" ]; then
+          Echo_Red "SSL Certificate file cannot be empty!"
+        else
+          break
+        fi
+      done
+      while :;do
+        Echo_Yellow "Please enter full path to SSL Certificate Key file: "
+        read ssl_certificate_key
+        if [ "${ssl_certificate_key}" == "" ]; then
+          Echo_Red "SSL Certificate Key file cannot be empty!"
+        else
+          break
+        fi
+      done
+      break
+    elif [[ "${ssl_choice}" =~ ^2|3|4$ ]]; then
+      Check_Acme_EMail
+      break
+    else
+      Echo_Red "Please Enter 1, 2, 3 or 4!"
+    fi
+  done
+
+  Return_301_Menu
+}
+
+Check_Acme_EMail()
+{
+  if [ ! -s /usr/local/acme.sh/account.conf ] || ! cat /usr/local/acme.sh/account.conf | grep -Eq "^ACCOUNT_EMAIL="; then
+    while :;do
+      Echo_Yellow "Please enter your email address: "
+      read email_address
+      if [[ "${email_address}" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,4}$ ]]; then
+        echo "Email address ${email_address} is valid."
+        break
+      else
+        echo "Email address ${email_address} is invalid! Please re-enter."
+      fi
+    done
+  fi
+}
+
+Return_301_Menu()
+{
+  Echo_Yellow "Using 301 to Redirect HTTP to HTTPS? (y/n) "
+  read using_301
+  if [[ "${using_301}" == "n" || "${using_301}" == "" ]]; then
+    echo "DO not setting 301 Redirect."
+  elif [ "${using_301}" == "y" ]; then
+    echo "Redirect http://${domain} to https://${domain} "
+  fi
+}
+
+Add_DNS_SSL_Select_Menu()
+{
+  echo "1: Use Let's Encrypt to create SSL Certificate and Key"
+  echo "2: Use ZeroSSL to create SSL Certificate and Key"
+  while :;do
+    Echo_Yellow "Enter 1 or 2: "
+    read dns_ssl_choice
+    if [[ "${dns_ssl_choice}" =~ ^1|2$ ]]; then
+      Check_Acme_EMail
+      break
+    else
+      Echo_Red "Please Enter 1 or 2!"
+    fi
+  done
+}
+
+Add_DNS_SSL_Only_Info_Menu()
+{
+  Add_DNS_SSL_Select_Menu
+
+  domain=""
+  while :;do
+    Echo_Yellow "Please enter domain(example: example.com): "
+    read domain
+    if [ "${domain}" != "" ] && [[ "$domain" = "${domain%[[:space:]]*}" ]]; then
+      echo " Your domain: ${domain}"
+      break
+    else
+      Echo_Red "Domain name can't be empty or contain spaces!"
+    fi
+  done
+
+  Echo_Yellow "Enter more domain name(example: *.example.com): "
+  read moredomain
+  if [ "${moredomain}" != "" ]; then
+    echo " domain list: ${moredomain}"
+  fi
+}
+
+Install_Check_Acme.sh()
+{
+  if [ -s /usr/local/acme.sh/acme.sh ]; then
+    echo "/usr/local/acme.sh/acme.sh [found]"
+    if ! cat /usr/local/acme.sh/account.conf | grep -Eq "^ACCOUNT_EMAIL="; then
+      /usr/local/acme.sh/acme.sh --register-account -m ${email_address}
+    fi
+  else
+    cd /tmp
+    [[ -f latest.tar.gz ]] && rm -f latest.tar.gz
+    wget https://soft.vpser.net/lib/acme.sh/latest.tar.gz --prefer-family=IPv4 --no-check-certificate
+    tar zxf latest.tar.gz
+    cd acme.sh-*
+    ./acme.sh --install ${acme_sh_sudo} --log --home /usr/local/acme.sh --certhome /usr/local/nginx/conf/ssl -m ${email_address}
+    cd ..
+    rm -f latest.tar.gz
+    rm -rf acme.sh-*
+    sed -i 's/cat "\$CERT_PATH"$/#cat "\$CERT_PATH"/g' /usr/local/acme.sh/acme.sh
+    cat >/usr/local/acme.sh/upgrade.sh<<EOF
+#!/bin/bash
+
+. "/usr/local/acme.sh/acme.sh.env"
+/usr/local/acme.sh/acme.sh --upgrade
+sed -i 's/cat "\\\$CERT_PATH"\$/#cat "\\\$CERT_PATH"/g' /usr/local/acme.sh/acme.sh
+sed -i 's/DEFAULT_ACCOUNT_KEY_LENGTH=ec-256/DEFAULT_ACCOUNT_KEY_LENGTH=2048/g' /usr/local/acme.sh/acme.sh
+sed -i 's/DEFAULT_DOMAIN_KEY_LENGTH=ec-256/DEFAULT_DOMAIN_KEY_LENGTH=2048/g' /usr/local/acme.sh/acme.sh
+EOF
+
+    chmod +x /usr/local/acme.sh/upgrade.sh
+    #if crontab -l|grep -q "/usr/local/acme.sh/upgrade.sh"; then
+    #    echo "acme.sh upgrade crontab rule is exist."
+    #else
+    #    echo "Add acme.sh upgrade crontab rule..."
+    #    (crontab -l ; echo '0 3 */7 * * /usr/local/acme.sh/upgrade.sh') | crontab -
+    #fi
+    if command -v yum >/dev/null 2>&1; then
+      yum -y update nss
+      yum -y install ca-certificates
+      service crond restart
+      chkconfig crond on
+    elif command -v apt-get >/dev/null 2>&1; then
+      /etc/init.d/cron restart
+      update-rc.d cron defaults
+    fi
+  fi
+
+  . "/usr/local/acme.sh/acme.sh.env"
+}
+
+Add_VHost_Config()
+{
+  if [ ! -f /usr/local/nginx/conf/rewrite/${rewrite}.conf ]; then
+    echo "Create Virtul Host Rewrite file......"
+    touch /usr/local/nginx/conf/rewrite/${rewrite}.conf
+    echo "Create rewirte file successful,You can add rewrite rule into /usr/local/nginx/conf/rewrite/${rewrite}.conf."
+  else
+    echo "You select the exist rewrite rule:/usr/local/nginx/conf/rewrite/${rewrite}.conf"
+  fi
+
+  cat >"/usr/local/nginx/conf/vhost/${domain}.conf"<<EOF
+server
+    {
+        listen 80;
+        #listen [::]:80;
+        server_name ${domain} ${moredomain};
+        index index.html index.htm index.php default.html default.htm default.php;
+        root  ${vhostdir};
+
+        include rewrite/${rewrite}.conf;
+        #error_page   404   /404.html;
+
+        # Deny access to PHP files in specific directory
+        #location ~ /(wp-content|uploads|wp-includes|images)/.*\.php$ { deny all; }
+
+        ${include_enable_php}location ~ .*\.(gif|jpg|jpeg|png|bmp|swf)$
+        {
+            expires      30d;
+        }
+
+        location ~ .*\.(js|css)?$
+        {
+            expires      12h;
+        }
+
+        location ~ /.well-known {
+            allow all;
+        }
+
+        location ~ /\.
+        {
+            deny all;
+        }
+
+        ${al}
+    }
+EOF
+
+  if [ "${enable_ipv6}" == "y" ]; then
+    sed -i 's/#listen \[::\]:80;/listen \[::\]:80;/g' /usr/local/nginx/conf/vhost/${domain}.conf
+  fi
+
+  echo "Test Nginx configure file......"
+  /usr/local/nginx/sbin/nginx -t
+  echo "Reload Nginx......"
+  /usr/local/nginx/sbin/nginx -s reload
+}
+
+Add_SSL()
+{
+  if [ "${ssl_choice}" == "1" ]; then
+    Create_SSL_Config
+  elif echo "${ssl_choice}" | grep -Eqi "^[2-4]$"; then
+    letsdomain=""
+    if [ "${moredomain}" != "" ]; then
+      letsdomain="-d ${domain}"
+      for i in ${moredomain};do
+        letsdomain=${letsdomain}" -d ${i}"
+      done
+    else
+      letsdomain="-d ${domain}"
+    fi
+    if [ ! -s "/usr/local/nginx/conf/vhost/${domain}.conf" ]; then
+      Add_VHost_Config
+    fi
+    if [ ! -d "${vhostdir}" ]; then
+      mkdir -p "${vhostdir}"
+    fi
+
+    if [[ "${vhostdir}" == "" || "${letsdomain}" == "" ]]; then
+      Echo_Red "Two parameters are needed!"
+      exit 1
+    fi
+    if [ ! -d "${vhostdir}" ]; then
+      Echo_Red "${vhostdir} does not exist or is not a directory!"
+      exit
+    fi
+
+    Install_Check_Acme.sh
+
+    if [ -s /usr/local/nginx/conf/ssl/${domain}/fullchain.cer ]; then
+      echo "Removing exist domain certificate..."
+      rm -rf /usr/local/nginx/conf/ssl/${domain}
+    fi
+
+    if [ "${ssl_choice}" == "2" ]; then
+      echo "Generate ssl certificate using Let's Encrypt..."
+      /usr/local/acme.sh/acme.sh ${acme_sh_sudo} --server letsencrypt --issue ${letsdomain} -w ${vhostdir} -k 2048 --reloadcmd "/etc/init.d/nginx reload"
+    elif [ "${ssl_choice}" == "3" ]; then
+      echo "Generate ssl certificate using BuyPass..."
+      /usr/local/acme.sh/acme.sh ${acme_sh_sudo} --server buypass --issue ${letsdomain} -w ${vhostdir} -k 2048 --days 170 --reloadcmd "/etc/init.d/nginx reload"
+    elif [ "${ssl_choice}" == "4" ]; then
+      echo "Generate ssl certificate using ZeroSSL..."
+      /usr/local/acme.sh/acme.sh ${acme_sh_sudo} --server zerossl --issue ${letsdomain} -w ${vhostdir} -k 2048 --reloadcmd "/etc/init.d/nginx reload"
+    fi
+    lets_status=$?
+
+    ssl_certificate="/usr/local/nginx/conf/ssl/${domain}/fullchain.cer"
+    ssl_certificate_key="/usr/local/nginx/conf/ssl/${domain}/${domain}.key"
+    if [ "${lets_status}" = 0 ]; then
+      Create_SSL_Config
+      Echo_Green " Generate SSL Certificate successfully."
+    else
+      Echo_Red " Generate SSL Certificate failed!"
+    fi
+  fi
+}
+
+Create_SSL_Config()
+{
+  if [ ! -s /usr/local/nginx/conf/ssl/dhparam.pem ]; then
+    echo "Create dhparam.pem..."
+    mkdir -p /usr/local/nginx/conf/ssl/
+    openssl dhparam -out /usr/local/nginx/conf/ssl/dhparam.pem 2048
+  fi
+
+  cat >>"/usr/local/nginx/conf/vhost/${domain}.conf"<<EOF
+
+server
+    {
+        listen 443 ssl;
+        #listen [::]:443 ssl;
+        http2 on;
+        server_name ${domain} ${moredomain};
+        index index.html index.htm index.php default.html default.htm default.php;
+        root  ${vhostdir};
+
+        ssl_certificate ${ssl_certificate};
+        ssl_certificate_key ${ssl_certificate_key};
+        ssl_session_timeout 5m;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_prefer_server_ciphers off;
+        #ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
+        #ssl_prefer_server_ciphers on;
+        ssl_ciphers "TLS13-AES-256-GCM-SHA384:TLS13-CHACHA20-POLY1305-SHA256:TLS13-AES-128-GCM-SHA256:TLS13-AES-128-CCM-8-SHA256:TLS13-AES-128-CCM-SHA256:EECDH+CHACHA20:EECDH+CHACHA20-draft:EECDH+AES128:RSA+AES128:EECDH+AES256:RSA+AES256:EECDH+3DES:RSA+3DES:!MD5";
+        ssl_session_cache builtin:1000 shared:SSL:10m;
+        # openssl dhparam -out /usr/local/nginx/conf/ssl/dhparam.pem 2048
+        ssl_dhparam /usr/local/nginx/conf/ssl/dhparam.pem;
+
+        include rewrite/${rewrite}.conf;
+        #error_page   404   /404.html;
+
+        # Deny access to PHP files in specific directory
+        #location ~ /(wp-content|uploads|wp-includes|images)/.*\.php$ { deny all; }
+
+        ${include_enable_php}location ~ .*\.(gif|jpg|jpeg|png|bmp|swf)$
+        {
+            expires      30d;
+        }
+
+        location ~ .*\.(js|css)?$
+        {
+            expires      12h;
+        }
+
+        location ~ /.well-known {
+            allow all;
+        }
+
+        location ~ /\.
+        {
+            deny all;
+        }
+
+        ${al}
+    }
+EOF
+
+  if [ "${using_301}" == "y" ]; then
+    sed -i '0,/access_log/!b;//i\        location / {\n            return 301 https://$host$request_uri;\n        }\n' /usr/local/nginx/conf/vhost/${domain}.conf
+    sed -i "0,/include rewrite\/${rewrite}.conf;/s//#include rewrite\/${rewrite}.conf;/" /usr/local/nginx/conf/vhost/${domain}.conf
+  fi
+
+  if [ "${enable_ipv6}" == "y" ]; then
+    sed -i 's/#listen \[::\]:443 ssl;/listen \[::\]:443 ssl;/g' /usr/local/nginx/conf/vhost/${domain}.conf
+  fi
+
+  echo "Test Nginx configure file......"
+  /usr/local/nginx/sbin/nginx -t
+  echo "Reload Nginx......"
+  /usr/local/nginx/sbin/nginx -s reload
+}
+
+Add_Dns_SSL()
+{
+  provider=$1
+  if [ "${provider}" != "" ]; then
+    dns_provider="dns_${provider}"
+  else
+    Echo_Red "The dns manual mode can not renew automatically, you must renew it manually."
+  fi
+
+  Add_SSL_Info_Menu
+  Add_DNS_SSL_Select_Menu
+  Return_301_Menu
+  Install_Check_Acme.sh
+
+  if [[ ! -s /usr/local/acme.sh/dnsapi/dns_${provider}.sh && "${provider}" != "" ]]; then
+    echo "DNS Provider: ${provider} not found."
+    exit 1
+  fi
+
+  if [ -s /usr/local/nginx/conf/ssl/${domain}/fullchain.cer ]; then
+    echo "Removing exist domain certificate..."
+    rm -rf /usr/local/nginx/conf/ssl/${domain}
+  fi
+
+  letsdomain=""
+  if [ "${moredomain}" != "" ]; then
+    letsdomain="-d ${domain}"
+    for i in ${moredomain};do
+      letsdomain=${letsdomain}" -d ${i}"
+    done
+  else
+    letsdomain="-d ${domain}"
+  fi
+
+  if echo "${letsdomain}" | grep -q '\*\.' && echo "${letsdomain}" | grep -qi 'www\.'; then
+    Echo_Red "wildcard SSL certificate DO NOT allow add www. subdomain."
+    exit 1
+  fi
+
+  if [ "${dns_ssl_choice}" == "1" ]; then
+    ca_server="letsencrypt"
+  elif [ "${dns_ssl_choice}" == "2" ]; then
+    ca_server="zerossl"
+  fi
+
+  echo "Generate ssl certificate using ${ca_server}..."
+  if [ "${provider}" != "" ]; then
+    /usr/local/acme.sh/acme.sh ${acme_sh_sudo} --server ${ca_server} --issue ${letsdomain} -k 2048 --dns ${dns_provider} --reloadcmd "/etc/init.d/nginx reload"
+    lets_status=$?
+  else
+    /usr/local/acme.sh/acme.sh ${acme_sh_sudo} --server ${ca_server} --issue ${letsdomain} -k 2048 --dns --yes-I-know-dns-manual-mode-enough-go-ahead-please
+    Echo_Yellow "Please add the above TXT record to the domain in 120 seconds!!!"
+    echo
+    Sleep_Sec 120
+    /usr/local/acme.sh/acme.sh ${acme_sh_sudo} --renew ${letsdomain} --yes-I-know-dns-manual-mode-enough-go-ahead-please
+    lets_status=$?
+  fi
+  if [ "${lets_status}" = 0 ] || [[ "${provider}" = "" && "${lets_status}" = 1 && -s "/usr/local/nginx/conf/ssl/${domain}/fullchain.cer" ]]; then
+  if [ ! -d "${vhostdir}" ]; then
+    echo "Create Virtul Host directory......"
+    mkdir -p ${vhostdir}
+    echo "set permissions of Virtual Host directory......"
+    chmod -R 755 ${vhostdir}
+    chown -R www:www ${vhostdir}
+  fi
+
+  if [ ! -s "/usr/local/nginx/conf/vhost/${domain}.conf" ]; then
+    Add_VHost_Config
+  fi
+  ssl_certificate="/usr/local/nginx/conf/ssl/${domain}/fullchain.cer"
+  ssl_certificate_key="/usr/local/nginx/conf/ssl/${domain}/${domain}.key"
+  Create_SSL_Config
+  Echo_Blue "------------------ SSL Certificate information as follows ------------------"
+  Echo_Blue "| Domain: ${domain} ${moredomain}"
+  Echo_Blue "| SSL Certificate: /usr/local/nginx/conf/ssl/${domain}/fullchain.cer"
+  Echo_Blue "| SSL Certificate Key: /usr/local/nginx/conf/ssl/${domain}/${domain}.key"
+  Echo_Blue "------------------------------------ ---------------------------------------"
+  Echo_Green " Generate SSL Certificate successfully."
+  else
+    Echo_Red " Generate SSL Certificate failed!"
+  fi
+}
+
+Add_Dns_SSL_Only()
+{
+  provider=$1
+  if [ "${provider}" != "" ]; then
+    dns_provider="dns_${provider}"
+  else
+    Echo_Red "The dns manual mode can not renew automatically, you must renew it manually."
+  fi
+
+  Add_DNS_SSL_Only_Info_Menu
+  Install_Check_Acme.sh
+
+  if [[ ! -s /usr/local/acme.sh/dnsapi/dns_${provider}.sh && "${provider}" != "" ]]; then
+    echo "DNS Provider: ${provider} not found."
+    exit 1
+  fi
+
+  if [ -s /usr/local/nginx/conf/ssl/${domain}/fullchain.cer ]; then
+    echo "Removing exist domain certificate..."
+    rm -rf /usr/local/nginx/conf/ssl/${domain}
+  fi
+
+  letsdomain=""
+  if [ "${moredomain}" != "" ]; then
+    letsdomain="-d ${domain}"
+    for i in ${moredomain};do
+      letsdomain=${letsdomain}" -d ${i}"
+    done
+  else
+    letsdomain="-d ${domain}"
+  fi
+
+  if echo "${letsdomain}" | grep -q '\*\.' && echo "${letsdomain}" | grep -qi 'www\.'; then
+    Echo_Red "wildcard SSL certificate DO NOT allow add www. subdomain."
+    exit 1
+  fi
+
+  if [ "${dns_ssl_choice}" == "1" ]; then
+    ca_server="letsencrypt"
+  elif [ "${dns_ssl_choice}" == "2" ]; then
+    ca_server="zerossl"
+  fi
+
+  echo "Starting create SSL Certificate use ${ca_server}..."
+  if [ "${provider}" != "" ]; then
+    /usr/local/acme.sh/acme.sh ${acme_sh_sudo} --server ${ca_server} --issue ${letsdomain} -k 2048 --dns ${dns_provider} --reloadcmd "/etc/init.d/nginx reload"
+    lets_status=$?
+  else
+    /usr/local/acme.sh/acme.sh ${acme_sh_sudo} --server ${ca_server} --issue ${letsdomain} -k 2048 --dns --yes-I-know-dns-manual-mode-enough-go-ahead-please
+    Echo_Yellow "Please add the above TXT record to the domain in 120 seconds!!!"
+    echo
+    Sleep_Sec 120
+    /usr/local/acme.sh/acme.sh ${acme_sh_sudo} --renew ${letsdomain} --yes-I-know-dns-manual-mode-enough-go-ahead-please
+    lets_status=$?
+  fi
+  if [ "${lets_status}" = 0 ] || [[ "${provider}" = "" && "${lets_status}" = 1 && -s "/usr/local/nginx/conf/ssl/${domain}/fullchain.cer" ]]; then
+    Echo_Blue "------------------ SSL Certificate information as follows ------------------"
+    Echo_Blue "| Domain: ${domain} ${moredomain}"
+    Echo_Blue "| SSL Certificate: /usr/local/nginx/conf/ssl/${domain}/fullchain.cer"
+    Echo_Blue "| SSL Certificate Key: /usr/local/nginx/conf/ssl/${domain}/${domain}.key"
+    Echo_Blue "------------------------------------ ---------------------------------------"
+    Echo_Green " Generate SSL Certificate successfully."
+  else
+    Echo_Red " Generate SSL Certificate failed!"
+  fi
+}
+
+case "${arg1}" in
+  start)
+    lmnp_start
+    ;;
+  stop)
+    lmnp_stop
+    ;;
+  restart)
+    lmnp_stop
+    lmnp_start
+    ;;
+  reload)
+    lmnp_reload
+    ;;
+  kill)
+    lmnp_kill
+    ;;
+  status)
+    lmnp_status
+    ;;
+  nginx)
+    /etc/init.d/nginx ${arg2}
+    ;;
+  php-fpm)
+    if [ -f /etc/init.d/php-fpm ]; then
+      /etc/init.d/php-fpm ${arg2}
+    else
+      Echo_Red "Cannot find php..."
+    fi
+    ;;
+  vhost)
+    Function_Vhost ${arg2}
+    ;;
+  ssl)
+    info="n"
+    Add_SSL_Menu
+    Add_SSL
+    ;;
+  dnsssl|dns)
+    Add_Dns_SSL ${arg2}
+    ;;
+  onlyssl)
+    Add_Dns_SSL_Only ${arg2}
+    ;;
+  *)
+    echo "Usage: lmnp {start|stop|reload|restart|kill|status}"
+    echo "Usage: lmnp {nginx|php-fpm} {start|stop|reload|restart|kill|status}"
+    echo "Usage: lmnp vhost {add|list|del}"
+    echo "Usage: lmnp ssl add"
+    echo "Usage: lmnp {dnsssl|dns} {cx|ali|cf|dp|he|gd|aws}"
+    echo "Usage: lmnp onlyssl {cx|ali|cf|dp|he|gd|aws}"
+    ;;
+esac
+exit
