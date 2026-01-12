@@ -7,3 +7,8 @@
 
 参考文档：
 - [Rclone](https://rclone.org/)
+
+# Transmission
+
+参考项目：
+- [transmission-web-control](https://github.com/ronggang/transmission-web-control)
