@@ -81,7 +81,7 @@ install() {
   service_rclone
   systemctl daemon-reload && systemctl enable rcloned
   configure_fuse
-  echo -e "{$INFO} Run 'rclone config' first then run 'systemctl start rcloned'"
+  echo -e "${INFO} Run 'rclone config' first then run 'systemctl start rcloned'"
 }
 
 Rclone_CONF_PATH="/home/rclone/.config"
