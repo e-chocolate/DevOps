@@ -7,6 +7,9 @@ if [ $(id -u) != "0" ]; then
   exit 1
 fi
 
+INFO="\e[0;32m[INFO]\e[0m"
+ERROR="\e[0;31m[ERROR]\e[0m"
+
 detect_arch() {
   case "$(uname -m)" in
     x86_64|amd64)
@@ -69,9 +72,12 @@ create_docker_user() {
     fi
     groupConfig="-g docker"
   fi
-  useradd ${uidConfig} ${groupConfig} -d /var/lib/docker -r -s /sbin/nologin docker
-  [ ! -d '/var/lib/docker' ] && mkdir /var/lib/docker
-  chown -R docker:docker /var/lib/docker
+  useradd ${uidConfig} ${groupConfig} -d /home/docker -r -s /sbin/nologin docker
+  [ ! -d '/home/docker' ] && {
+    echo -e "${INFO} Create Docker HOME"
+    mkdir /home/docker
+    chown -R docker:docker /home/docker
+  }
 }
 
 add_docker_user() {
