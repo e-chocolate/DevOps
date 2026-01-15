@@ -87,8 +87,8 @@ install_aria2() {
 configure_aria2() {
   mkdir -p $userHome/.config/aria2 && touch $userHome/.config/aria2/aria2.session
   chown -R $my_aria2_user:$my_aria2_user $userHome/.config/aria2
-  mkdir -p $userHome/{aria2,completed}
-  chown -R $my_aria2_user:$my_aria2_user $userHome/aria2 $userHome/completed
+  mkdir -p $userHome/{aria2,Downloads}
+  chown -R $my_aria2_user:$my_aria2_user $userHome/aria2 $userHome/Downloads
   mkdir -p $userHome/logs
   chown -R $my_aria2_user:$my_aria2_user $userHome/logs
 
@@ -122,7 +122,7 @@ configure_aria2_scripts() {
     sed -i "s|drive-name={rlone-drive-name}|drive-name=$my_rlone_drive_name|g" $Aria2_Config_PATH/scripts/script.conf
     sed -i "s|upload-log={upload-log-file}|upload-log=$userHome/logs/aria2-upload.log|g" $Aria2_Config_PATH/scripts/script.conf
   fi
-  sed -i "s|dest-dir={move-dest-dir}|dest-dir=$userHome/completed|g" $Aria2_Config_PATH/scripts/script.conf
+  sed -i "s|dest-dir={move-dest-dir}|dest-dir=$userHome/Downloads|g" $Aria2_Config_PATH/scripts/script.conf
 }
 
 install_aria2_service() {
