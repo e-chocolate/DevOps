@@ -697,9 +697,12 @@ Create_SSL_Config()
 server
     {
         listen 443 ssl;
+        listen 443 quic reuseport;
         #listen [::]:443 ssl;
+        #listen [::]:443 quic reuseport;
         http2 on;
         server_name ${domain} ${moredomain};
+        add_header Alt-Svc 'h3=":443"; ma=86400';
         index index.html index.htm index.php default.html default.htm default.php;
         root  ${vhostdir};
 
@@ -751,6 +754,7 @@ EOF
 
   if [ "${enable_ipv6}" == "y" ]; then
     sed -i 's/#listen \[::\]:443 ssl;/listen \[::\]:443 ssl;/g' /usr/local/nginx/conf/vhost/${domain}.conf
+    sed -i 's/#listen \[::\]:443 quic reuseport;/listen \[::\]:443 quic reuseport;/g' /usr/local/nginx/conf/vhost/${domain}.conf
   fi
 
   echo "Test Nginx configure file......"
